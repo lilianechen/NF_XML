@@ -27,33 +27,38 @@ def process_xml_files(uploaded_files):
                 referencia = produto.find("ns:prod/ns:cProd", ns).text if produto.find("ns:prod/ns:cProd", ns) is not None else "N/A"
                 CFOP = produto.find("ns:prod/ns:CFOP", ns).text if produto.find("ns:prod/ns:CFOP", ns) is not None else "N/A"
                 numero_pedido = produto.find("ns:prod/ns:xPed", ns).text if produto.find("ns:prod/ns:xPed", ns) is not None else "N/A"
-                
-                # Conversão com Decimal
-                quantidade = Decimal(produto.find("ns:prod/ns:qCom", ns).text)
-                valor_ipi = Decimal(produto.find("ns:imposto/ns:IPI/ns:IPITrib/ns:vIPI", ns).text or '0')
-                aliquota_ipi = Decimal(produto.find("ns:imposto/ns:IPI/ns:IPITrib/ns:pIPI", ns).text or '0')
-                valor_icms_st = Decimal(produto.find("ns:imposto/ns:ICMS/ns:ICMS10/ns:vICMSST", ns).text or '0')
-                valor_fcp_st = Decimal(produto.find("ns:imposto/ns:ICMS/ns:ICMS10/ns:vFCPST", ns).text or '0')
+
+                quantidade = Decimal(produto.find("ns:prod/ns:qCom", ns).text or '0')
                 valor_unitario = Decimal(produto.find("ns:prod/ns:vUnCom", ns).text or '0')
 
-                icms_normal = None
-                for tag in ["ICMS00", "ICMS10", "ICMS20", "ICMS30"]:
-                    icms_normal_element = produto.find(f"ns:imposto/ns:ICMS/ns:{tag}/ns:vICMS", ns)
-                    if icms_normal_element is not None:
-                        icms_normal = Decimal(icms_normal_element.text)
-                        break
-                valor_icms_normal = icms_normal if icms_normal is not None else Decimal('0')
+                # Proteção: busca segura
+                def get_decimal(path):
+                    el = produto.find(path, ns)
+                    return Decimal(el.text) if el is not None else Decimal('0')
 
-                icms_fcp = None
-                for tag in ["ICMS00", "ICMS10", "ICMS20", "ICMS30"]:
-                    icms_fcp_element = produto.find(f"ns:imposto/ns:ICMS/ns:{tag}/ns:vFCP", ns)
-                    if icms_fcp_element is not None:
-                        icms_fcp = Decimal(icms_fcp_element.text)
-                        break
-                valor_icmsFCP_normal = icms_fcp if icms_fcp is not None else Decimal('0')
+                valor_ipi = get_decimal("ns:imposto/ns:IPI/ns:IPITrib/ns:vIPI")
+                aliquota_ipi = get_decimal("ns:imposto/ns:IPI/ns:IPITrib/ns:pIPI")
+                valor_icms_st = get_decimal("ns:imposto/ns:ICMS/ns:ICMS10/ns:vICMSST")
+                valor_fcp_st = get_decimal("ns:imposto/ns:ICMS/ns:ICMS10/ns:vFCPST")
 
-                valor_pis = Decimal(produto.find("ns:imposto/ns:PIS/ns:PISAliq/ns:vPIS", ns).text or '0')
-                valor_cofins = Decimal(produto.find("ns:imposto/ns:COFINS/ns:COFINSAliq/ns:vCOFINS", ns).text or '0')
+                # Busca para ICMS Normal
+                valor_icms_normal = Decimal('0')
+                for tag in ["ICMS00", "ICMS10", "ICMS20", "ICMS30"]:
+                    el = produto.find(f"ns:imposto/ns:ICMS/ns:{tag}/ns:vICMS", ns)
+                    if el is not None:
+                        valor_icms_normal = Decimal(el.text)
+                        break
+
+                # Busca para ICMS FCP Normal
+                valor_icmsFCP_normal = Decimal('0')
+                for tag in ["ICMS00", "ICMS10", "ICMS20", "ICMS30"]:
+                    el = produto.find(f"ns:imposto/ns:ICMS/ns:{tag}/ns:vFCP", ns)
+                    if el is not None:
+                        valor_icmsFCP_normal = Decimal(el.text)
+                        break
+
+                valor_pis = get_decimal("ns:imposto/ns:PIS/ns:PISAliq/ns:vPIS")
+                valor_cofins = get_decimal("ns:imposto/ns:COFINS/ns:COFINSAliq/ns:vCOFINS")
 
                 # Evita divisão por zero
                 q = quantidade if quantidade != 0 else Decimal('1')
@@ -90,10 +95,11 @@ def process_xml_files(uploaded_files):
                     "Natureza": natureza,
                     "CNPJ": cnpj_destinatario.zfill(14)
                 })
+
         except ET.ParseError:
             st.error(f"Erro ao processar o arquivo: {uploaded_file.name}")
 
-    # DataFrame com números como número
+    # DataFrame com números
     df = pd.DataFrame(data)
 
     # Exportar para Excel como número
@@ -105,7 +111,7 @@ def process_xml_files(uploaded_files):
     return output
 
 # Interface Streamlit
-st.title("Processador de XMLs de Notas Fiscais — Números como número")
+st.title("Processador de XMLs de Notas Fiscais — Protegido e com Decimais")
 
 uploaded_files = st.file_uploader("Faça upload dos arquivos XML", accept_multiple_files=True, type=['xml'])
 
