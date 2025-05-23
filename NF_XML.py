@@ -89,16 +89,22 @@ def process_xml_files(uploaded_files):
     for col in num_cols:
         df[col] = convert_to_float(df[col])
 
-    # Cálculos adicionais
+    # Cálculos adicionais com proteção
+    q = df['Quantidade_Comercial'].where(df['Quantidade_Comercial'] != 0, 1)  # Evita divisão por zero
+
     df['Valor_Unitario_Total'] = (
-        df['Valor_IPI'] / df['Quantidade_Comercial'] +
-        df['Valor_ICMS_Normal'] / df['Quantidade_Comercial'] +
+        df['Valor_IPI'].where(df['Quantidade_Comercial'] != 0, 0) / q +
+        df['Valor_ICMS_Normal'].where(df['Quantidade_Comercial'] != 0, 0) / q +
         df['Valor_Unitario'] +
-        df['Valor_ICMS_ST'] / df['Quantidade_Comercial']
+        df['Valor_ICMS_ST'].where(df['Quantidade_Comercial'] != 0, 0) / q
     )
 
-    df['Valor_Unitario_ICMS_ST'] = df['Valor_ICMS_ST'] / df['Quantidade_Comercial']
-    df['Valor_Unitario_ICMS_FCP_ST'] = df['Valor_FCP_ST'] / df['Quantidade_Comercial']
+    df['Valor_Unitario_ICMS_ST'] = df['Valor_ICMS_ST'].where(df['Quantidade_Comercial'] != 0, 0) / q
+    df['Valor_Unitario_ICMS_FCP_ST'] = df['Valor_FCP_ST'].where(df['Quantidade_Comercial'] != 0, 0) / q
+
+    # Visualização no Streamlit
+    st.subheader("Pré-visualização dos cálculos unitários:")
+    st.write(df[['Valor_Unitario_Total', 'Valor_Unitario_ICMS_ST', 'Valor_Unitario_ICMS_FCP_ST']].head())
 
     # Resumo corrigido
     resumo = (
@@ -122,7 +128,7 @@ def process_xml_files(uploaded_files):
         .reset_index()
     )
 
-    # Criação do arquivo Excel em memória
+    # Geração do Excel em memória
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, sheet_name='Detalhado', index=False)
