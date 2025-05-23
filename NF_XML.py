@@ -72,20 +72,20 @@ def process_xml_files(uploaded_files):
                     "Nome_Destinatario": nome_destinatario,
                     "Produto": nome_produto,
                     "Referencia": referencia,
-                    "Quantidade_Comercial": quantidade,
-                    "Valor_IPI": valor_ipi,
-                    "Aliquota_IPI": aliquota_ipi,
-                    "Valor_ICMS_ST": valor_icms_st,
-                    "Valor_FCP_ST": valor_fcp_st,
-                    "Valor_ICMS_Normal": valor_icms_normal,
-                    "Valor_ICMSFCP_Normal": valor_icmsFCP_normal,
-                    "Valor_PIS": valor_pis,
-                    "Valor_COFINS": valor_cofins,
-                    "Valor_Unitario": valor_unitario,
-                    "Valor_Unitario_IPI": valor_unitario_ipi,
-                    "Valor_Unitario_ICMS_ST": valor_unitario_icms_st,
-                    "Valor_Unitario_ICMS_FCP_ST": valor_unitario_fcp_st,
-                    "Valor_Unitario_Total": valor_unitario_total,
+                    "Quantidade_Comercial": float(quantidade),
+                    "Valor_IPI": float(valor_ipi),
+                    "Aliquota_IPI": float(aliquota_ipi),
+                    "Valor_ICMS_ST": float(valor_icms_st),
+                    "Valor_FCP_ST": float(valor_fcp_st),
+                    "Valor_ICMS_Normal": float(valor_icms_normal),
+                    "Valor_ICMSFCP_Normal": float(valor_icmsFCP_normal),
+                    "Valor_PIS": float(valor_pis),
+                    "Valor_COFINS": float(valor_cofins),
+                    "Valor_Unitario": float(valor_unitario),
+                    "Valor_Unitario_IPI": float(valor_unitario_ipi),
+                    "Valor_Unitario_ICMS_ST": float(valor_unitario_icms_st),
+                    "Valor_Unitario_ICMS_FCP_ST": float(valor_unitario_fcp_st),
+                    "Valor_Unitario_Total": float(valor_unitario_total),
                     "CFOP": CFOP,
                     "Natureza": natureza,
                     "CNPJ": cnpj_destinatario.zfill(14)
@@ -93,14 +93,10 @@ def process_xml_files(uploaded_files):
         except ET.ParseError:
             st.error(f"Erro ao processar o arquivo: {uploaded_file.name}")
 
-    # DataFrame com Decimal -> converte para string
+    # DataFrame com números como número
     df = pd.DataFrame(data)
-    df = df.astype(str)
 
-    # Substituir ponto por vírgula
-    df = df.applymap(lambda x: x.replace('.', ',') if isinstance(x, str) and '.' in x else x)
-
-    # Exportar para Excel
+    # Exportar para Excel como número
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, sheet_name='Detalhado', index=False)
@@ -109,7 +105,7 @@ def process_xml_files(uploaded_files):
     return output
 
 # Interface Streamlit
-st.title("Processador de XMLs de Notas Fiscais — Decimal + Vírgula")
+st.title("Processador de XMLs de Notas Fiscais — Números como número")
 
 uploaded_files = st.file_uploader("Faça upload dos arquivos XML", accept_multiple_files=True, type=['xml'])
 
