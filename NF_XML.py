@@ -28,7 +28,7 @@ def process_xml_files(uploaded_files):
                 CFOP = produto.find("ns:prod/ns:CFOP", ns).text if produto.find("ns:prod/ns:CFOP", ns) is not None else "N/A"
                 numero_pedido = produto.find("ns:prod/ns:xPed", ns).text if produto.find("ns:prod/ns:xPed", ns) is not None else "N/A"
                 
-                # Conversão direta com Decimal
+                # Conversão com Decimal
                 quantidade = Decimal(produto.find("ns:prod/ns:qCom", ns).text)
                 valor_ipi = Decimal(produto.find("ns:imposto/ns:IPI/ns:IPITrib/ns:vIPI", ns).text or '0')
                 aliquota_ipi = Decimal(produto.find("ns:imposto/ns:IPI/ns:IPITrib/ns:pIPI", ns).text or '0')
@@ -93,9 +93,12 @@ def process_xml_files(uploaded_files):
         except ET.ParseError:
             st.error(f"Erro ao processar o arquivo: {uploaded_file.name}")
 
-    # DataFrame com Decimal -> converte para string para Excel
+    # DataFrame com Decimal -> converte para string
     df = pd.DataFrame(data)
     df = df.astype(str)
+
+    # Substituir ponto por vírgula
+    df = df.applymap(lambda x: x.replace('.', ',') if isinstance(x, str) and '.' in x else x)
 
     # Exportar para Excel
     output = io.BytesIO()
@@ -106,7 +109,7 @@ def process_xml_files(uploaded_files):
     return output
 
 # Interface Streamlit
-st.title("Processador de XMLs de Notas Fiscais — Precisão Decimal")
+st.title("Processador de XMLs de Notas Fiscais — Decimal + Vírgula")
 
 uploaded_files = st.file_uploader("Faça upload dos arquivos XML", accept_multiple_files=True, type=['xml'])
 
