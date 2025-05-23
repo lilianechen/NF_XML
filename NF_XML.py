@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import xml.etree.ElementTree as ET
 import io
-import zipfile
 
 # Função para processar arquivos XML
 def process_xml_files(uploaded_files):
@@ -85,11 +84,23 @@ def process_xml_files(uploaded_files):
     def convert_to_float(column):
         return column.str.replace(',', '.', regex=False).astype(float)
 
-    num_cols = ['Quantidade_Comercial', 'Valor_IPI', 'Valor_ICMS_Normal', 'Valor_PIS', 'Valor_COFINS', 'Valor_Unitario',
-                'Aliquota_IPI', 'Valor_ICMS_ST', 'Valor_FCP_ST', 'Valor_ICMSFCP_Normal']
+    num_cols = ['Quantidade_Comercial', 'Valor_IPI', 'Valor_ICMS_Normal', 'Valor_PIS', 'Valor_COFINS',
+                'Valor_Unitario', 'Aliquota_IPI', 'Valor_ICMS_ST', 'Valor_FCP_ST', 'Valor_ICMSFCP_Normal']
     for col in num_cols:
         df[col] = convert_to_float(df[col])
 
+    # Cálculos adicionais
+    df['Valor_Unitario_Total'] = (
+        df['Valor_IPI'] / df['Quantidade_Comercial'] +
+        df['Valor_ICMS_Normal'] / df['Quantidade_Comercial'] +
+        df['Valor_Unitario'] +
+        df['Valor_ICMS_ST'] / df['Quantidade_Comercial']
+    )
+
+    df['Valor_Unitario_ICMS_ST'] = df['Valor_ICMS_ST'] / df['Quantidade_Comercial']
+    df['Valor_Unitario_ICMS_FCP_ST'] = df['Valor_FCP_ST'] / df['Quantidade_Comercial']
+
+    # Resumo corrigido
     resumo = (
         df.groupby('Numero_Nota', group_keys=False)
         .apply(lambda group: pd.Series({
@@ -101,7 +112,12 @@ def process_xml_files(uploaded_files):
             'Total_PIS': group['Valor_PIS'].sum(),
             'Total_COFINS': group['Valor_COFINS'].sum(),
             'Total_ST': group['Valor_ICMS_ST'].sum() + group['Valor_FCP_ST'].sum(),
-            'Somatorio_ColunaC_D': ((group['Quantidade_Comercial'] * group['Valor_Unitario']) + group['Valor_IPI']).sum()
+            'Somatorio_ColunaC_D': (
+                (group['Quantidade_Comercial'] * group['Valor_Unitario']) +
+                group['Valor_IPI'] +
+                group['Valor_ICMS_Normal'] +
+                group['Valor_ICMS_ST']
+            ).sum()
         }))
         .reset_index()
     )
@@ -124,7 +140,6 @@ if uploaded_files:
     if st.button('Processar Arquivos'):
         with st.spinner('Processando...'):
             excel_output = process_xml_files(uploaded_files)
-
         st.success('Processamento concluído!')
 
         st.download_button(
