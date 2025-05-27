@@ -96,6 +96,9 @@ def process_xml_files(uploaded_files):
     # DataFrame
     df = pd.DataFrame(data)
 
+    # ✅ Excluir Natureza que contenha "Remessa"
+    df = df[~df['Natureza'].str.contains('Remessa', na=False, case=False)]
+
     # Garantir colunas numéricas
     num_cols = [
         'Quantidade_Comercial', 'Valor_IPI', 'Aliquota_IPI', 'Valor_ICMS_ST', 'Valor_FCP_ST',
@@ -137,7 +140,7 @@ def process_xml_files(uploaded_files):
     return output
 
 # Streamlit
-st.title("Processador de XMLs de Notas Fiscais — com Resumo")
+st.title("Processador de XMLs de Notas Fiscais — com Filtro de Remessa e Resumo")
 
 uploaded_files = st.file_uploader("Faça upload dos arquivos XML", accept_multiple_files=True, type=['xml'])
 
