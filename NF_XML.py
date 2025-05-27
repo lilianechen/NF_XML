@@ -7,7 +7,6 @@ from decimal import Decimal, getcontext
 # Aumentar precisão
 getcontext().prec = 15
 
-# Função para processar arquivos XML
 def process_xml_files(uploaded_files):
     data = []
     ns = {"ns": "http://www.portalfiscal.inf.br/nfe"}
@@ -31,7 +30,6 @@ def process_xml_files(uploaded_files):
                 quantidade = Decimal(produto.find("ns:prod/ns:qCom", ns).text or '0')
                 valor_unitario = Decimal(produto.find("ns:prod/ns:vUnCom", ns).text or '0')
 
-                # Proteção: busca segura
                 def get_decimal(path):
                     el = produto.find(path, ns)
                     return Decimal(el.text) if el is not None else Decimal('0')
@@ -41,7 +39,6 @@ def process_xml_files(uploaded_files):
                 valor_icms_st = get_decimal("ns:imposto/ns:ICMS/ns:ICMS10/ns:vICMSST")
                 valor_fcp_st = get_decimal("ns:imposto/ns:ICMS/ns:ICMS10/ns:vFCPST")
 
-                # Busca para ICMS Normal
                 valor_icms_normal = Decimal('0')
                 for tag in ["ICMS00", "ICMS10", "ICMS20", "ICMS30"]:
                     el = produto.find(f"ns:imposto/ns:ICMS/ns:{tag}/ns:vICMS", ns)
@@ -49,7 +46,6 @@ def process_xml_files(uploaded_files):
                         valor_icms_normal = Decimal(el.text)
                         break
 
-                # Busca para ICMS FCP Normal
                 valor_icmsFCP_normal = Decimal('0')
                 for tag in ["ICMS00", "ICMS10", "ICMS20", "ICMS30"]:
                     el = produto.find(f"ns:imposto/ns:ICMS/ns:{tag}/ns:vFCP", ns)
@@ -60,10 +56,8 @@ def process_xml_files(uploaded_files):
                 valor_pis = get_decimal("ns:imposto/ns:PIS/ns:PISAliq/ns:vPIS")
                 valor_cofins = get_decimal("ns:imposto/ns:COFINS/ns:COFINSAliq/ns:vCOFINS")
 
-                # Evita divisão por zero
                 q = quantidade if quantidade != 0 else Decimal('1')
 
-                # Cálculos unitários
                 valor_unitario_ipi = valor_ipi / q
                 valor_unitario_icms_st = valor_icms_st / q
                 valor_unitario_fcp_st = valor_fcp_st / q
@@ -99,19 +93,51 @@ def process_xml_files(uploaded_files):
         except ET.ParseError:
             st.error(f"Erro ao processar o arquivo: {uploaded_file.name}")
 
-    # DataFrame com números
+    # DataFrame
     df = pd.DataFrame(data)
 
-    # Exportar para Excel como número
+    # Garantir colunas numéricas
+    num_cols = [
+        'Quantidade_Comercial', 'Valor_IPI', 'Aliquota_IPI', 'Valor_ICMS_ST', 'Valor_FCP_ST',
+        'Valor_ICMS_Normal', 'Valor_ICMSFCP_Normal', 'Valor_PIS', 'Valor_COFINS',
+        'Valor_Unitario', 'Valor_Unitario_IPI', 'Valor_Unitario_ICMS_ST',
+        'Valor_Unitario_ICMS_FCP_ST', 'Valor_Unitario_Total'
+    ]
+    df[num_cols] = df[num_cols].astype(float)
+
+    # Criar resumo
+    resumo = (
+        df.groupby('Numero_Nota', group_keys=False)
+        .apply(lambda group: pd.Series({
+            'Somatorio_Quantidade': group['Quantidade_Comercial'].sum(),
+            'Somatorio_Valor_Mercadoria': (group['Quantidade_Comercial'] * group['Valor_Unitario']).sum(),
+            'Total_IPI': group['Valor_IPI'].sum(),
+            'Total_ICMS': group['Valor_ICMS_Normal'].sum(),
+            'Total_ICMS_FCP': group['Valor_ICMSFCP_Normal'].sum(),
+            'Total_PIS': group['Valor_PIS'].sum(),
+            'Total_COFINS': group['Valor_COFINS'].sum(),
+            'Total_ST': group['Valor_ICMS_ST'].sum() + group['Valor_FCP_ST'].sum(),
+            'Somatorio_ColunaC_D': (
+                (group['Quantidade_Comercial'] * group['Valor_Unitario']) +
+                group['Valor_IPI'] +
+                group['Valor_ICMS_Normal'] +
+                group['Valor_ICMS_ST']
+            ).sum()
+        }))
+        .reset_index()
+    )
+
+    # Exportar para Excel
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df.to_excel(writer, sheet_name='Detalhado', index=False)
+        resumo.to_excel(writer, sheet_name='Resumo', index=False)
     output.seek(0)
 
     return output
 
-# Interface Streamlit
-st.title("Processador de XMLs de Notas Fiscais — Protegido e com Decimais")
+# Streamlit
+st.title("Processador de XMLs de Notas Fiscais — com Resumo")
 
 uploaded_files = st.file_uploader("Faça upload dos arquivos XML", accept_multiple_files=True, type=['xml'])
 
