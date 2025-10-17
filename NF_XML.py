@@ -11,15 +11,54 @@ def process_xml_files(uploaded_files):
     data = []
     ns = {"ns": "http://www.portalfiscal.inf.br/nfe"}
 
+    def classificar_operacao(cfop: str, natureza: str, finNFe: str, tpNF: str) -> str:
+        n = (natureza or "").lower()
+        c = (cfop or "").strip()
+        # finNFe: 1=normal, 2=complementar, 3=ajuste, 4=devolução
+        if "remessa" in n:
+            return "Remessa"
+        if finNFe == "4" or "devolu" in n:
+            return "Devolução"
+        if "bonifica" in n:
+            return "Bonificação"
+        if "transfer" in n:
+            return "Transferência"
+        if c[:1] in {"5", "6", "7"} or tpNF == "1":
+            return "Saída/Venda"
+        if c[:1] in {"1", "2", "3"} or tpNF == "0":
+            return "Entrada"
+        return "Outras"
+
     for uploaded_file in uploaded_files:
         try:
             tree = ET.parse(uploaded_file)
             root = tree.getroot()
 
-            numero_nota = root.find(".//ns:ide/ns:nNF", ns).text if root.find(".//ns:ide/ns:nNF", ns) is not None else "N/A"
-            natureza = root.find(".//ns:ide/ns:natOp", ns).text if root.find(".//ns:ide/ns:natOp", ns) is not None else "N/A"
-            nome_destinatario = root.find(".//ns:dest/ns:xNome", ns).text if root.find(".//ns:dest/ns:xNome", ns) is not None else "N/A"
-            cnpj_destinatario = root.find(".//ns:dest/ns:CNPJ", ns).text if root.find(".//ns:dest/ns:CNPJ", ns) is not None else "N/A"
+            numero_nota = (root.find(".//ns:ide/ns:nNF", ns).text
+                           if root.find(".//ns:ide/ns:nNF", ns) is not None else "N/A")
+            natureza = (root.find(".//ns:ide/ns:natOp", ns).text
+                        if root.find(".//ns:ide/ns:natOp", ns) is not None else "N/A")
+            tpNF = (root.find(".//ns:ide/ns:tpNF", ns).text
+                    if root.find(".//ns:ide/ns:tpNF", ns) is not None else "")  # 0=entrada,1=saída
+            finNFe = (root.find(".//ns:ide/ns:finNFe", ns).text
+                      if root.find(".//ns:ide/ns:finNFe", ns) is not None else "")  # 1..4
+
+            nome_destinatario = (root.find(".//ns:dest/ns:xNome", ns).text
+                                 if root.find(".//ns:dest/ns:xNome", ns) is not None else "N/A")
+            cnpj_destinatario_el = root.find(".//ns:dest/ns:CNPJ", ns)
+            cpf_destinatario_el = root.find(".//ns:dest/ns:CPF", ns)
+            doc_dest = (cnpj_destinatario_el.text if cnpj_destinatario_el is not None
+                        else (cpf_destinatario_el.text if cpf_destinatario_el is not None else ""))
+            doc_dest = (doc_dest or "").zfill(14) if doc_dest else "N/A"
+
+            # (opcional) também captura o emitente para referência
+            nome_emitente = (root.find(".//ns:emit/ns:xNome", ns).text
+                             if root.find(".//ns:emit/ns:xNome", ns) is not None else "N/A")
+            cnpj_emitente_el = root.find(".//ns:emit/ns:CNPJ", ns)
+            cpf_emitente_el = root.find(".//ns:emit/ns:CPF", ns)
+            doc_emit = (cnpj_emitente_el.text if cnpj_emitente_el is not None
+                        else (cpf_emitente_el.text if cpf_emitente_el is not None else ""))
+            doc_emit = (doc_emit or "").zfill(14) if doc_emit else "N/A"
 
             for produto in root.findall(".//ns:det", ns):
                 nome_produto = produto.find("ns:prod/ns:xProd", ns).text if produto.find("ns:prod/ns:xProd", ns) is not None else "N/A"
@@ -27,29 +66,40 @@ def process_xml_files(uploaded_files):
                 CFOP = produto.find("ns:prod/ns:CFOP", ns).text if produto.find("ns:prod/ns:CFOP", ns) is not None else "N/A"
                 numero_pedido = produto.find("ns:prod/ns:xPed", ns).text if produto.find("ns:prod/ns:xPed", ns) is not None else "N/A"
 
-                quantidade = Decimal(produto.find("ns:prod/ns:qCom", ns).text or '0')
-                valor_unitario = Decimal(produto.find("ns:prod/ns:vUnCom", ns).text or '0')
+                # Quantidade / valores
+                def dec_from(el):
+                    return Decimal(el.text) if el is not None and el.text not in (None, "") else Decimal("0")
+
+                quantidade = dec_from(produto.find("ns:prod/ns:qCom", ns)) or Decimal("0")
+                valor_unitario = dec_from(produto.find("ns:prod/ns:vUnCom", ns))
 
                 def get_decimal(path):
                     el = produto.find(path, ns)
-                    return Decimal(el.text) if el is not None else Decimal('0')
+                    return Decimal(el.text) if el is not None and el.text not in (None, "") else Decimal('0')
 
                 valor_ipi = get_decimal("ns:imposto/ns:IPI/ns:IPITrib/ns:vIPI")
                 aliquota_ipi = get_decimal("ns:imposto/ns:IPI/ns:IPITrib/ns:pIPI")
-                valor_icms_st = get_decimal("ns:imposto/ns:ICMS/ns:ICMS10/ns:vICMSST")
-                valor_fcp_st = get_decimal("ns:imposto/ns:ICMS/ns:ICMS10/ns:vFCPST")
+                valor_icms_st = (
+                    get_decimal("ns:imposto/ns:ICMS/ns:ICMS10/ns:vICMSST")
+                    or get_decimal("ns:imposto/ns:ICMS/ns:ICMS60/ns:vICMSST")
+                )
+                valor_fcp_st = (
+                    get_decimal("ns:imposto/ns:ICMS/ns:ICMS10/ns:vFCPST")
+                    or get_decimal("ns:imposto/ns:ICMS/ns:ICMS60/ns:vFCPST")
+                )
 
+                # ICMS normal (pega primeiro que existir)
                 valor_icms_normal = Decimal('0')
-                for tag in ["ICMS00", "ICMS10", "ICMS20", "ICMS30"]:
+                for tag in ["ICMS00", "ICMS10", "ICMS20", "ICMS30", "ICMS40", "ICMS51", "ICMS70", "ICMS90"]:
                     el = produto.find(f"ns:imposto/ns:ICMS/ns:{tag}/ns:vICMS", ns)
-                    if el is not None:
+                    if el is not None and el.text not in (None, ""):
                         valor_icms_normal = Decimal(el.text)
                         break
 
                 valor_icmsFCP_normal = Decimal('0')
-                for tag in ["ICMS00", "ICMS10", "ICMS20", "ICMS30"]:
+                for tag in ["ICMS00", "ICMS10", "ICMS20", "ICMS30", "ICMS51", "ICMS70", "ICMS90"]:
                     el = produto.find(f"ns:imposto/ns:ICMS/ns:{tag}/ns:vFCP", ns)
-                    if el is not None:
+                    if el is not None and el.text not in (None, ""):
                         valor_icmsFCP_normal = Decimal(el.text)
                         break
 
@@ -57,20 +107,28 @@ def process_xml_files(uploaded_files):
                 valor_cofins = get_decimal("ns:imposto/ns:COFINS/ns:COFINSAliq/ns:vCOFINS")
 
                 q = quantidade if quantidade != 0 else Decimal('1')
-
                 valor_unitario_ipi = valor_ipi / q
                 valor_unitario_icms_st = valor_icms_st / q
                 valor_unitario_fcp_st = valor_fcp_st / q
-
                 valor_unitario_total = valor_unitario + valor_unitario_ipi + valor_unitario_icms_st + valor_unitario_fcp_st
+
+                tipo_operacao = classificar_operacao(CFOP, natureza, finNFe, tpNF)
 
                 data.append({
                     "Arquivo": uploaded_file.name,
                     "Numero_Nota": numero_nota,
                     "Numero_Pedido": numero_pedido,
-                    "Nome_Destinatario": nome_destinatario,
+                    "Emitente_Nome": nome_emitente,
+                    "Emitente_Doc": doc_emit,
+                    "Destinatario_Nome": nome_destinatario,
+                    "Destinatario_Doc": doc_dest,
                     "Produto": nome_produto,
                     "Referencia": referencia,
+                    "CFOP": CFOP,
+                    "Natureza": natureza,
+                    "tpNF": tpNF,
+                    "finNFe": finNFe,
+                    "Tipo_Operacao": tipo_operacao,
                     "Quantidade_Comercial": float(quantidade),
                     "Valor_IPI": float(valor_ipi),
                     "Aliquota_IPI": float(aliquota_ipi),
@@ -85,19 +143,13 @@ def process_xml_files(uploaded_files):
                     "Valor_Unitario_ICMS_ST": float(valor_unitario_icms_st),
                     "Valor_Unitario_ICMS_FCP_ST": float(valor_unitario_fcp_st),
                     "Valor_Unitario_Total": float(valor_unitario_total),
-                    "CFOP": CFOP,
-                    "Natureza": natureza,
-                    "CNPJ": cnpj_destinatario.zfill(14)
                 })
 
         except ET.ParseError:
             st.error(f"Erro ao processar o arquivo: {uploaded_file.name}")
 
-    # DataFrame
+    # DataFrame com TUDO (sem excluir remessa!)
     df = pd.DataFrame(data)
-
-    # ✅ Excluir Natureza que contenha "Remessa"
-    df = df[~df['Natureza'].str.contains('Remessa', na=False, case=False)]
 
     # Garantir colunas numéricas
     num_cols = [
@@ -106,26 +158,29 @@ def process_xml_files(uploaded_files):
         'Valor_Unitario', 'Valor_Unitario_IPI', 'Valor_Unitario_ICMS_ST',
         'Valor_Unitario_ICMS_FCP_ST', 'Valor_Unitario_Total'
     ]
-    df[num_cols] = df[num_cols].astype(float)
+    if not df.empty:
+        df[num_cols] = df[num_cols].astype(float)
 
-    # Criar resumo
+    # Resumo por nota
     resumo = (
-        df.groupby('Numero_Nota', group_keys=False)
-        .apply(lambda group: pd.Series({
-            'Somatorio_Quantidade': group['Quantidade_Comercial'].sum(),
-            'Somatorio_Valor_Mercadoria': (group['Quantidade_Comercial'] * group['Valor_Unitario']).sum(),
-            'Total_IPI': group['Valor_IPI'].sum(),
-            'Total_ICMS': group['Valor_ICMS_Normal'].sum(),
-            'Total_ICMS_FCP': group['Valor_ICMSFCP_Normal'].sum(),
-            'Total_PIS': group['Valor_PIS'].sum(),
-            'Total_COFINS': group['Valor_COFINS'].sum(),
-            'Total_ST': group['Valor_ICMS_ST'].sum() + group['Valor_FCP_ST'].sum(),
+        df.groupby('Numero_Nota', dropna=False, group_keys=False)
+        .apply(lambda g: pd.Series({
+            'Somatorio_Quantidade': g['Quantidade_Comercial'].sum(),
+            'Somatorio_Valor_Mercadoria': (g['Quantidade_Comercial'] * g['Valor_Unitario']).sum(),
+            'Total_IPI': g['Valor_IPI'].sum(),
+            'Total_ICMS': g['Valor_ICMS_Normal'].sum(),
+            'Total_ICMS_FCP': g['Valor_ICMSFCP_Normal'].sum(),
+            'Total_PIS': g['Valor_PIS'].sum(),
+            'Total_COFINS': g['Valor_COFINS'].sum(),
+            'Total_ST': g['Valor_ICMS_ST'].sum() + g['Valor_FCP_ST'].sum(),
             'Somatorio_ColunaC_D': (
-                (group['Quantidade_Comercial'] * group['Valor_Unitario']) +
-                group['Valor_IPI'] +
-                group['Valor_ICMS_Normal'] +
-                group['Valor_ICMS_ST']
-            ).sum()
+                (g['Quantidade_Comercial'] * g['Valor_Unitario']) +
+                g['Valor_IPI'] +
+                g['Valor_ICMS_Normal'] +
+                g['Valor_ICMS_ST']
+            ).sum(),
+            # ajuda a conciliar: mostra o tipo mais frequente naquela NF
+            'Tipo_Operacao_predominante': g['Tipo_Operacao'].mode().iloc[0] if not g['Tipo_Operacao'].mode().empty else ""
         }))
         .reset_index()
     )
@@ -140,7 +195,7 @@ def process_xml_files(uploaded_files):
     return output
 
 # Streamlit
-st.title("Processador de XMLs de Notas Fiscais — com Filtro de Remessa e Resumo")
+st.title("Processador de XMLs de NF-e — Todas as operações (venda, remessa, devolução, etc.)")
 
 uploaded_files = st.file_uploader("Faça upload dos arquivos XML", accept_multiple_files=True, type=['xml'])
 
@@ -153,6 +208,6 @@ if uploaded_files:
         st.download_button(
             label="Baixar Arquivo Excel",
             data=excel_output,
-            file_name="valores_completos_IPI_ICMS_decimal.xlsx",
+            file_name="nfe_todas_operacoes.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
