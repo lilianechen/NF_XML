@@ -177,6 +177,15 @@ def process_xml_files(uploaded_files, progress_bar, status_text):
     # Criar DataFrame
     df = pd.DataFrame(all_data)
     
+    # FILTRAR: Remover notas de remessa
+    if not df.empty:
+        total_antes = len(df)
+        df = df[df['Tipo_Operacao'] != 'Remessa'].copy()
+        total_depois = len(df)
+        remessas_removidas = total_antes - total_depois
+        if remessas_removidas > 0:
+            st.info(f"🗑️ {remessas_removidas} linha(s) de notas de Remessa foram removidas do processamento")
+    
     # Garantir colunas numéricas
     num_cols = [
         'Quantidade_Comercial', 'Valor_IPI', 'Aliquota_IPI', 'Valor_ICMS_ST', 'Valor_FCP_ST',
@@ -240,7 +249,7 @@ st.set_page_config(
 )
 
 st.title("📄 Processador de XMLs de NF-e")
-st.markdown("### Todas as operações (venda, remessa, devolução, etc.)")
+st.markdown("### Processamento de vendas, devoluções, bonificações, etc. (exceto Remessa)")
 
 # Aumentar limite de upload
 st.markdown("""
@@ -248,6 +257,7 @@ st.markdown("""
 - Para mais de 200 XMLs, use um arquivo ZIP
 - Limite recomendado: até 5000 arquivos por processamento
 - Arquivos ZIP podem ter até 200MB
+- ⚠️ **Notas de Remessa são automaticamente excluídas do processamento**
 """)
 
 # Tabs para diferentes métodos de upload
@@ -328,7 +338,7 @@ with st.expander("ℹ️ Sobre o processador"):
     - Tipo de operação predominante
     
     **Tipos de operação identificados:**
-    - Remessa
+    - ~~Remessa~~ (automaticamente excluída)
     - Devolução
     - Bonificação
     - Transferência
