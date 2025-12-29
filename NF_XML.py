@@ -10,9 +10,11 @@ from io import BytesIO
 getcontext().prec = 15
 
 def classificar_operacao(cfop: str, natureza: str, finNFe: str, tpNF: str) -> str:
-    n = (natureza or "").lower()
-    c = (cfop or "").strip()
-    if "remessa" in n:
+    n = str(natureza or "").lower().strip()
+    c = str(cfop or "").strip()
+    
+    # Verificar remessa de forma mais abrangente
+    if "remessa" in n or "remess" in n:
         return "Remessa"
     if finNFe == "4" or "devolu" in n:
         return "Devolução"
@@ -177,14 +179,22 @@ def process_xml_files(uploaded_files, progress_bar, status_text):
     # Criar DataFrame
     df = pd.DataFrame(all_data)
     
-    # FILTRAR: Remover notas de remessa
     if not df.empty:
+        # Debug: mostrar tipos de operação encontrados
+        st.write("🔍 **Tipos de operação encontrados:**")
+        tipos_encontrados = df['Tipo_Operacao'].value_counts()
+        st.dataframe(tipos_encontrados, use_container_width=False)
+        
+        # FILTRAR: Remover notas de remessa
         total_antes = len(df)
         df = df[df['Tipo_Operacao'] != 'Remessa'].copy()
         total_depois = len(df)
         remessas_removidas = total_antes - total_depois
+        
         if remessas_removidas > 0:
-            st.info(f"🗑️ {remessas_removidas} linha(s) de notas de Remessa foram removidas do processamento")
+            st.success(f"✅ {remessas_removidas} linha(s) de notas de **Remessa** foram removidas do processamento")
+        else:
+            st.info("ℹ️ Nenhuma nota de Remessa foi encontrada nos arquivos processados")
     
     # Garantir colunas numéricas
     num_cols = [
