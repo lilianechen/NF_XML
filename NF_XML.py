@@ -5,6 +5,7 @@ import io
 from decimal import Decimal, getcontext
 import zipfile
 from io import BytesIO
+from datetime import datetime
 
 # Aumentar precisão
 getcontext().prec = 15
@@ -39,6 +40,26 @@ def process_single_xml(xml_content, filename):
 
         numero_nota = (root.find(".//ns:ide/ns:nNF", ns).text
                        if root.find(".//ns:ide/ns:nNF", ns) is not None else "N/A")
+        
+        # ADICIONAR DATA DE EMISSÃO
+        data_emissao_element = root.find(".//ns:ide/ns:dhEmi", ns)
+        if data_emissao_element is not None:
+            try:
+                # Formato: 2024-01-15T10:30:00-03:00
+                data_emissao_str = data_emissao_element.text
+                # Remover o timezone para facilitar o parsing
+                if '+' in data_emissao_str or data_emissao_str.count('-') > 2:
+                    data_emissao_str = data_emissao_str.split('-03:00')[0].split('+')[0].split('-')
+                    data_emissao_str = '-'.join(data_emissao_str[:3]) + 'T' + ':'.join(data_emissao_str[3:]) if len(data_emissao_str) > 3 else data_emissao_str[0]
+                
+                # Parse da data
+                data_emissao = datetime.fromisoformat(data_emissao_str.replace('T', ' ').split('.')[0])
+                data_emissao_formatada = data_emissao.strftime('%d/%m/%Y %H:%M:%S')
+            except:
+                data_emissao_formatada = data_emissao_element.text
+        else:
+            data_emissao_formatada = "N/A"
+        
         natureza = (root.find(".//ns:ide/ns:natOp", ns).text
                     if root.find(".//ns:ide/ns:natOp", ns) is not None else "N/A")
         tpNF = (root.find(".//ns:ide/ns:tpNF", ns).text
@@ -117,6 +138,7 @@ def process_single_xml(xml_content, filename):
             data.append({
                 "Arquivo": filename,
                 "Numero_Nota": numero_nota,
+                "Data_Emissao": data_emissao_formatada,  # NOVA COLUNA
                 "Numero_Pedido": numero_pedido,
                 "Emitente_Nome": nome_emitente,
                 "Emitente_Doc": doc_emit,
@@ -210,6 +232,7 @@ def process_xml_files(uploaded_files, progress_bar, status_text):
     resumo = (
         df.groupby('Numero_Nota', dropna=False, group_keys=False)
         .apply(lambda g: pd.Series({
+            'Data_Emissao': g['Data_Emissao'].iloc[0] if len(g) > 0 else "N/A",  # ADICIONAR DATA NO RESUMO
             'Somatorio_Quantidade': g['Quantidade_Comercial'].sum(),
             'Somatorio_Valor_Mercadoria': (g['Quantidade_Comercial'] * g['Valor_Unitario']).sum(),
             'Total_IPI': g['Valor_IPI'].sum(),
@@ -339,11 +362,13 @@ with st.expander("ℹ️ Sobre o processador"):
     
     **Aba Detalhado:**
     - Informações de cada produto em cada nota
+    - **Data de emissão da nota fiscal**
     - Dados fiscais completos (IPI, ICMS, PIS, COFINS, etc.)
     - Classificação automática do tipo de operação
     
     **Aba Resumo:**
     - Totalizadores por nota fiscal
+    - **Data de emissão de cada nota**
     - Valores consolidados de impostos
     - Tipo de operação predominante
     
