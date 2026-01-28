@@ -23,11 +23,25 @@ def classificar_operacao(cfop: str, natureza: str, finNFe: str, tpNF: str) -> st
         return "Bonificação"
     if "transfer" in n:
         return "Transferência"
+    # Importação
+    if "importa" in n or c == "3102":
+        return "Importação"
     if c[:1] in {"5", "6", "7"} or tpNF == "1":
         return "Saída/Venda"
     if c[:1] in {"1", "2", "3"} or tpNF == "0":
         return "Entrada"
     return "Outras"
+
+def get_decimal_value(produto, paths, ns):
+    """
+    Tenta encontrar um valor decimal em múltiplos caminhos XML.
+    Útil para buscar impostos que podem estar em diferentes nodes.
+    """
+    for path in paths:
+        el = produto.find(path, ns)
+        if el is not None and el.text not in (None, ""):
+            return Decimal(el.text)
+    return Decimal('0')
 
 def process_single_xml(xml_content, filename):
     """Processa um único arquivo XML e retorna os dados"""
@@ -95,21 +109,29 @@ def process_single_xml(xml_content, filename):
             quantidade = dec_from(produto.find("ns:prod/ns:qCom", ns)) or Decimal("0")
             valor_unitario = dec_from(produto.find("ns:prod/ns:vUnCom", ns))
 
-            def get_decimal(path):
-                el = produto.find(path, ns)
-                return Decimal(el.text) if el is not None and el.text not in (None, "") else Decimal('0')
+            # ===== BUSCAR IPI - SUPORTA MÚLTIPLAS ESTRUTURAS =====
+            # Tenta IPITrib primeiro (vendas), depois IPINT (importação/isentos)
+            valor_ipi = get_decimal_value(produto, [
+                "ns:imposto/ns:IPI/ns:IPITrib/ns:vIPI",
+                "ns:imposto/ns:IPI/ns:IPINT/ns:vIPI",
+            ], ns)
+            
+            aliquota_ipi = get_decimal_value(produto, [
+                "ns:imposto/ns:IPI/ns:IPITrib/ns:pIPI",
+                "ns:imposto/ns:IPI/ns:IPINT/ns:pIPI",
+            ], ns)
 
-            valor_ipi = get_decimal("ns:imposto/ns:IPI/ns:IPITrib/ns:vIPI")
-            aliquota_ipi = get_decimal("ns:imposto/ns:IPI/ns:IPITrib/ns:pIPI")
+            # ===== BUSCAR ICMS ST =====
             valor_icms_st = (
-                get_decimal("ns:imposto/ns:ICMS/ns:ICMS10/ns:vICMSST")
-                or get_decimal("ns:imposto/ns:ICMS/ns:ICMS60/ns:vICMSST")
+                get_decimal_value(produto, ["ns:imposto/ns:ICMS/ns:ICMS10/ns:vICMSST"], ns)
+                or get_decimal_value(produto, ["ns:imposto/ns:ICMS/ns:ICMS60/ns:vICMSST"], ns)
             )
             valor_fcp_st = (
-                get_decimal("ns:imposto/ns:ICMS/ns:ICMS10/ns:vFCPST")
-                or get_decimal("ns:imposto/ns:ICMS/ns:ICMS60/ns:vFCPST")
+                get_decimal_value(produto, ["ns:imposto/ns:ICMS/ns:ICMS10/ns:vFCPST"], ns)
+                or get_decimal_value(produto, ["ns:imposto/ns:ICMS/ns:ICMS60/ns:vFCPST"], ns)
             )
 
+            # ===== BUSCAR ICMS NORMAL =====
             valor_icms_normal = Decimal('0')
             for tag in ["ICMS00", "ICMS10", "ICMS20", "ICMS30", "ICMS40", "ICMS51", "ICMS70", "ICMS90"]:
                 el = produto.find(f"ns:imposto/ns:ICMS/ns:{tag}/ns:vICMS", ns)
@@ -124,8 +146,23 @@ def process_single_xml(xml_content, filename):
                     valor_icmsFCP_normal = Decimal(el.text)
                     break
 
-            valor_pis = get_decimal("ns:imposto/ns:PIS/ns:PISAliq/ns:vPIS")
-            valor_cofins = get_decimal("ns:imposto/ns:COFINS/ns:COFINSAliq/ns:vCOFINS")
+            # ===== BUSCAR PIS - SUPORTA MÚLTIPLAS ESTRUTURAS =====
+            # Tenta PISAliq (vendas tributadas), depois PISOutr (outras operações, importação)
+            valor_pis = get_decimal_value(produto, [
+                "ns:imposto/ns:PIS/ns:PISAliq/ns:vPIS",
+                "ns:imposto/ns:PIS/ns:PISOutr/ns:vPIS",
+                "ns:imposto/ns:PIS/ns:PISNT/ns:vPIS",
+                "ns:imposto/ns:PIS/ns:PISQtde/ns:vPIS",
+            ], ns)
+
+            # ===== BUSCAR COFINS - SUPORTA MÚLTIPLAS ESTRUTURAS =====
+            # Tenta COFINSAliq (vendas tributadas), depois COFINSOutr (outras operações, importação)
+            valor_cofins = get_decimal_value(produto, [
+                "ns:imposto/ns:COFINS/ns:COFINSAliq/ns:vCOFINS",
+                "ns:imposto/ns:COFINS/ns:COFINSOutr/ns:vCOFINS",
+                "ns:imposto/ns:COFINS/ns:COFINSNT/ns:vCOFINS",
+                "ns:imposto/ns:COFINS/ns:COFINSQtde/ns:vCOFINS",
+            ], ns)
 
             q = quantidade if quantidade != 0 else Decimal('1')
             valor_unitario_ipi = valor_ipi / q
@@ -138,7 +175,7 @@ def process_single_xml(xml_content, filename):
             data.append({
                 "Arquivo": filename,
                 "Numero_Nota": numero_nota,
-                "Data_Emissao": data_emissao_formatada,  # NOVA COLUNA
+                "Data_Emissao": data_emissao_formatada,
                 "Numero_Pedido": numero_pedido,
                 "Emitente_Nome": nome_emitente,
                 "Emitente_Doc": doc_emit,
@@ -232,7 +269,7 @@ def process_xml_files(uploaded_files, progress_bar, status_text):
     resumo = (
         df.groupby('Numero_Nota', dropna=False, group_keys=False)
         .apply(lambda g: pd.Series({
-            'Data_Emissao': g['Data_Emissao'].iloc[0] if len(g) > 0 else "N/A",  # ADICIONAR DATA NO RESUMO
+            'Data_Emissao': g['Data_Emissao'].iloc[0] if len(g) > 0 else "N/A",
             'Somatorio_Quantidade': g['Quantidade_Comercial'].sum(),
             'Somatorio_Valor_Mercadoria': (g['Quantidade_Comercial'] * g['Valor_Unitario']).sum(),
             'Total_IPI': g['Valor_IPI'].sum(),
@@ -282,7 +319,7 @@ st.set_page_config(
 )
 
 st.title("📄 Processador de XMLs de NF-e")
-st.markdown("### Processamento de vendas, devoluções, bonificações, etc. (exceto Remessa)")
+st.markdown("### Processamento de vendas, importações, devoluções, bonificações, etc. (exceto Remessa)")
 
 # Aumentar limite de upload
 st.markdown("""
@@ -291,6 +328,8 @@ st.markdown("""
 - Limite recomendado: até 5000 arquivos por processamento
 - Arquivos ZIP podem ter até 200MB
 - ⚠️ **Notas de Remessa são automaticamente excluídas do processamento**
+
+**✨ Novidade:** Agora extrai corretamente impostos de **Notas de Importação** e **Notas de Venda**!
 """)
 
 # Tabs para diferentes métodos de upload
@@ -363,7 +402,7 @@ with st.expander("ℹ️ Sobre o processador"):
     **Aba Detalhado:**
     - Informações de cada produto em cada nota
     - **Data de emissão da nota fiscal**
-    - Dados fiscais completos (IPI, ICMS, PIS, COFINS, etc.)
+    - Dados fiscais completos (IPI, PIS, COFINS, etc.)
     - Classificação automática do tipo de operação
     
     **Aba Resumo:**
@@ -374,10 +413,17 @@ with st.expander("ℹ️ Sobre o processador"):
     
     **Tipos de operação identificados:**
     - ~~Remessa~~ (automaticamente excluída)
+    - **Importação** (detecta automaticamente)
     - Devolução
     - Bonificação
     - Transferência
     - Saída/Venda
     - Entrada
     - Outras
+    
+    **Impostos suportados:**
+    - **IPI**: Tributado (IPITrib) e Não Tributado/Isento (IPINT)
+    - **PIS**: Alíquota (PISAliq), Outras Operações (PISOutr), Não Tributado (PISNT), Quantidade (PISQtde)
+    - **COFINS**: Alíquota (COFINSAliq), Outras Operações (COFINSOutr), Não Tributado (COFINSNT), Quantidade (COFINSQtde)
+    - **ICMS**: Normal e Substituição Tributária
     """)
